@@ -10,6 +10,7 @@ order-worker/.mvn/wrapper/maven-wrapper.jar
 # Node
 clients-api/node_modules/
 clients-api/dist/
+*.tsbuildinfo
 
 # Go
 products-api/bin/
