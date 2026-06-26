@@ -33,6 +33,10 @@ config/        Wiring Spring, Kafka y Resilience4j.
 
 Los adaptadores solo traducen protocolos. El servicio de aplicación orquesta `Mono`/`Flux`; no contiene configuración técnica. Las reglas tributarias vivirán exclusivamente en `domain` y usarán `BigDecimal`.
 
+## Regla de impuesto base
+
+`TaxCalculationService` es un servicio de dominio puro. Calcula cada línea con `BigDecimal` y redondeo `HALF_UP` a dos decimales: `subtotal = quantity × unitPrice`, `taxAmount = subtotal × taxRate` y `lineTotal = subtotal + taxAmount`. Las tasas son `GRAVADO` 19 %, `REDUCIDO` 5 % y `EXENTO` 0 %. El `taxRegime` del cliente se conserva en la orden enriquecida, pero no altera la tasa.
+
 ## Módulos
 
 | Directorio | Tecnología | Responsabilidad |
