@@ -33,6 +33,8 @@ config/        Wiring Spring, Kafka y Resilience4j.
 
 Los adaptadores solo traducen protocolos. El servicio de aplicación orquesta `Mono`/`Flux`; no contiene configuración técnica. Las reglas tributarias vivirán exclusivamente en `domain` y usarán `BigDecimal`.
 
+`OrderProcessingService` implementa el caso de uso principal: verifica idempotencia, obtiene cliente y productos por puertos reactivos, calcula la orden enriquecida con el dominio y persiste por el puerto de repositorio. Si el pedido ya existe como `PROCESSED`, termina sin consultar APIs externas ni guardar duplicados.
+
 ## Regla de impuesto base
 
 `TaxCalculationService` es un servicio de dominio puro. Calcula cada línea con `BigDecimal` y redondeo `HALF_UP` a dos decimales: `subtotal = quantity × unitPrice`, `taxAmount = subtotal × taxRate` y `lineTotal = subtotal + taxAmount`. Las tasas son `GRAVADO` 19 %, `REDUCIDO` 5 % y `EXENTO` 0 %. El `taxRegime` del cliente se conserva en la orden enriquecida, pero no altera la tasa.
@@ -53,6 +55,8 @@ docker compose up --build
 ```
 
 Las variables disponibles están en `.env.example`. Docker Compose utiliza esos valores como defaults, por lo que no requiere un `.env` para iniciar.
+
+Las pruebas del worker se ejecutan sin una instalación global de Maven mediante `./mvnw test` (o `./mvnw.cmd test` en Windows).
 
 ## Decisiones ya fijadas
 

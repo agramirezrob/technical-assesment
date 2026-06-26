@@ -10,11 +10,11 @@ type Client = {
 };
 
 const clients: Record<string, Client> = {
-  'client-001': { clientId: 'client-001', name: 'Distribuidora Norte', segment: 'MAYORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'NORTE', channel: 'TRADICIONAL' },
-  'client-002': { clientId: 'client-002', name: 'Mercado Central', segment: 'MINORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'CENTRO', channel: 'MODERNO' },
-  'client-003': { clientId: 'client-003', name: 'Bodega San José', segment: 'MINORISTA', taxRegime: 'NO_RESPONSABLE', region: 'SUR', channel: 'TRADICIONAL' },
-  'client-004': { clientId: 'client-004', name: 'Mayorista Andino', segment: 'MAYORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'ANDINA', channel: 'DISTRIBUIDOR' },
-  'client-005': { clientId: 'client-005', name: 'Autoservicio Pacífico', segment: 'MINORISTA', taxRegime: 'NO_RESPONSABLE', region: 'COSTA', channel: 'MODERNO' }
+  'CLI-99821': { clientId: 'CLI-99821', name: 'Distribuidora Andina S.A.S', segment: 'MAYORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'Valle del Cauca', channel: 'B2B' },
+  'CLI-99822': { clientId: 'CLI-99822', name: 'Mercado Central', segment: 'MINORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'Bogota D.C.', channel: 'MODERNO' },
+  'CLI-99823': { clientId: 'CLI-99823', name: 'Bodega San Jose', segment: 'MINORISTA', taxRegime: 'NO_RESPONSABLE', region: 'Antioquia', channel: 'TRADICIONAL' },
+  'CLI-99824': { clientId: 'CLI-99824', name: 'Mayorista Caribe', segment: 'MAYORISTA', taxRegime: 'RESPONSABLE_IVA', region: 'Atlantico', channel: 'DISTRIBUIDOR' },
+  'CLI-99825': { clientId: 'CLI-99825', name: 'Autoservicio Pacifico', segment: 'MINORISTA', taxRegime: 'NO_RESPONSABLE', region: 'Cauca', channel: 'MODERNO' }
 };
 
 @Controller()
