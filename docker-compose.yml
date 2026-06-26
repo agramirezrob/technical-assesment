@@ -42,6 +42,17 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic orders-dlt --partitions 3 --replication-factor 1"
     restart: "no"
 
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "${KAFKA_UI_PORT:-8083}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
   mongodb:
     image: mongo:7.0
     ports:
@@ -51,6 +62,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8084}:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongodb:27017/
+      ME_CONFIG_BASICAUTH: "false"
+      ME_CONFIG_BASICAUTH_ENABLED: "false"
 
   redis:
     image: redis:7.2-alpine

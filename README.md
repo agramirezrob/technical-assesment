@@ -58,6 +58,22 @@ Las variables disponibles están en `.env.example`. Docker Compose utiliza esos 
 
 Las pruebas del worker se ejecutan sin una instalación global de Maven mediante `./mvnw test` (o `./mvnw.cmd test` en Windows).
 
+## Herramientas visuales locales
+
+Al levantar el stack también quedan disponibles:
+
+| Herramienta | URL | Uso |
+| --- | --- | --- |
+| Kafka UI | `http://localhost:8083` | Ver `orders-topic`, `orders-dlt`, mensajes, consumer groups y particiones. |
+| Mongo Express | `http://localhost:8084` | Ver la base `orders` y la colección `enriched-orders`. |
+
+Puertos configurables:
+
+```env
+KAFKA_UI_PORT=8083
+MONGO_EXPRESS_PORT=8084
+```
+
 ## Decisiones ya fijadas
 
 - Consumidor Kafka con `reactor-kafka`; los errores agotados se convertirán en eventos DLT con `timestamp`, causa e intento.
