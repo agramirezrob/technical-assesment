@@ -1,0 +1,20 @@
+.idea/
+.vscode/
+*.iml
+.env
+
+# Java
+order-worker/target/
+order-worker/.mvn/wrapper/maven-wrapper.jar
+
+# Node
+clients-api/node_modules/
+clients-api/dist/
+
+# Go
+products-api/bin/
+products-api/api
+.cache/
+
+# Local infrastructure data
+.data/
