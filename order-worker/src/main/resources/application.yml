@@ -4,6 +4,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  data:
+    mongodb:
+      uri: ${MONGODB_URI}
+      auto-index-creation: true
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
 server:
   port: ${SERVER_PORT}
 management:
@@ -14,6 +21,11 @@ management:
 app:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    orders-topic: ${KAFKA_ORDERS_TOPIC:orders-topic}
+    dlt-topic: ${KAFKA_DLT_TOPIC:orders-dlt}
+    consumer-group-id: ${KAFKA_CONSUMER_GROUP_ID:order-worker}
+    max-attempts: ${KAFKA_MAX_ATTEMPTS:3}
+    retry-delay: ${KAFKA_RETRY_DELAY:500ms}
   mongodb:
     uri: ${MONGODB_URI}
   redis:
@@ -24,3 +36,24 @@ app:
     clients-base-url: ${CLIENTS_API_BASE_URL}
   cache:
     ttl-seconds: ${CACHE_TTL_SECONDS}
+resilience4j:
+  circuitbreaker:
+    instances:
+      products-api:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+      clients-api:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+  retry:
+    instances:
+      products-api:
+        max-attempts: 3
+        wait-duration: 300ms
+      clients-api:
+        max-attempts: 3
+        wait-duration: 300ms

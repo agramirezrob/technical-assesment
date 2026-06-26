@@ -6,7 +6,6 @@ import com.b2b.orders.application.port.out.OrderRepositoryPort;
 import com.b2b.orders.application.port.out.ProductCatalogPort;
 import com.b2b.orders.domain.model.Client;
 import com.b2b.orders.domain.model.EnrichedOrder;
-import com.b2b.orders.domain.model.OrderItem;
 import com.b2b.orders.domain.model.OrderReceived;
 import com.b2b.orders.domain.model.Product;
 import com.b2b.orders.domain.model.TaxCategory;
@@ -48,7 +47,7 @@ public final class OrderProcessingService implements ProcessOrderUseCase {
     private Mono<EnrichedOrder> enrichCalculateAndSave(OrderReceived order) {
         Mono<Client> client = clientDirectory.findById(order.clientId()).map(this::toClient);
         Mono<Map<String, Product>> productsById = Flux.fromIterable(order.items())
-                .map(OrderItem::productId)
+                .map(item -> Objects.requireNonNull(item, "order item is required").productId())
                 .distinct()
                 .flatMap(productCatalog::findById)
                 .map(this::toProduct)

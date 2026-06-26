@@ -92,6 +92,10 @@ services:
       - "${WORKER_PORT:-8080}:8080"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_ORDERS_TOPIC: ${KAFKA_ORDERS_TOPIC:-orders-topic}
+      KAFKA_DLT_TOPIC: ${KAFKA_DLT_TOPIC:-orders-dlt}
+      KAFKA_CONSUMER_GROUP_ID: ${KAFKA_CONSUMER_GROUP_ID:-order-worker}
+      KAFKA_MAX_ATTEMPTS: ${KAFKA_MAX_ATTEMPTS:-3}
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/orders}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
