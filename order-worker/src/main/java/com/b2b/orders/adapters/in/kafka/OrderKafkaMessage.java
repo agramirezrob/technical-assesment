@@ -6,6 +6,7 @@ import com.b2b.orders.domain.model.OrderReceived;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 record OrderKafkaMessage(
         String orderId,
@@ -20,11 +21,22 @@ record OrderKafkaMessage(
                 clientId,
                 channel,
                 createdAt,
-                items.stream()
-                        .map(item -> new OrderItem(item.productId(), item.quantity(), item.unitPrice()))
+                requireItems().stream()
+                        .map(item -> Objects.requireNonNull(item, "order item is required").toDomain())
                         .toList()
         );
     }
 
-    record Item(String productId, int quantity, BigDecimal unitPrice) {}
+    private List<Item> requireItems() {
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("items must not be empty");
+        }
+        return items;
+    }
+
+    record Item(String productId, int quantity, BigDecimal unitPrice) {
+        OrderItem toDomain() {
+            return new OrderItem(productId, quantity, Objects.requireNonNull(unitPrice, "unitPrice is required"));
+        }
+    }
 }

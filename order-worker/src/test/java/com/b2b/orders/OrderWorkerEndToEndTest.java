@@ -4,9 +4,16 @@ import com.b2b.orders.adapters.out.mongodb.document.EnrichedOrderDocument;
 import com.b2b.orders.adapters.out.mongodb.repository.ReactiveEnrichedOrderMongoRepository;
 import com.b2b.orders.application.port.out.ClientDirectoryPort;
 import com.b2b.orders.application.port.out.ProductCatalogPort;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,8 +33,11 @@ import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 
 @SpringBootTest(
         classes = {OrderWorkerApplication.class, OrderWorkerEndToEndTest.ExternalApiStubs.class},
@@ -48,6 +58,7 @@ import java.util.Properties;
 @Testcontainers(disabledWithoutDocker = true)
 class OrderWorkerEndToEndTest {
     private static final String ORDER_ID = "ORD-2024-COL-E2E";
+    private static final String INVALID_ORDER_ID = "ORD-2024-COL-DLT";
 
     @Container
     static final ConfluentKafkaContainer KAFKA = new ConfluentKafkaContainer(
@@ -60,10 +71,12 @@ class OrderWorkerEndToEndTest {
     );
 
     private final ReactiveEnrichedOrderMongoRepository repository;
+    private final ObjectMapper objectMapper;
 
     @Autowired
-    OrderWorkerEndToEndTest(ReactiveEnrichedOrderMongoRepository repository) {
+    OrderWorkerEndToEndTest(ReactiveEnrichedOrderMongoRepository repository, ObjectMapper objectMapper) {
         this.repository = repository;
+        this.objectMapper = objectMapper;
     }
 
     @DynamicPropertySource
@@ -74,7 +87,7 @@ class OrderWorkerEndToEndTest {
 
     @Test
     void consumesKafkaOrderAndPersistsEnrichedOrderInMongo() throws Exception {
-        publishOrder();
+        publish("orders-topic", ORDER_ID, validOrderPayload(ORDER_ID));
 
         Mono<EnrichedOrderDocument> persistedOrder = Mono.defer(() -> repository.findByOrderId(ORDER_ID))
                 .repeatWhenEmpty(40, repeat -> repeat.delayElements(Duration.ofMillis(250)));
@@ -91,8 +104,33 @@ class OrderWorkerEndToEndTest {
                 .verifyComplete();
     }
 
-    private void publishOrder() throws Exception {
-        String payload = """
+    @Test
+    void sendsInvalidKafkaMessageToDeadLetterTopic() throws Exception {
+        String invalidPayload = """
+                {
+                  "orderId": "%s",
+                  "clientId": "CLI-99821",
+                  "channel": "B2B",
+                  "createdAt": "2024-09-12T10:45:00Z",
+                  "items": null
+                }
+                """.formatted(INVALID_ORDER_ID);
+
+        publish("orders-topic", INVALID_ORDER_ID, invalidPayload);
+
+        JsonNode deadLetter = waitForDeadLetter(INVALID_ORDER_ID);
+
+        StepVerifier.create(repository.findByOrderId(INVALID_ORDER_ID))
+                .verifyComplete();
+
+        org.junit.jupiter.api.Assertions.assertEquals(INVALID_ORDER_ID, deadLetter.get("orderId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(2, deadLetter.get("attempt").asInt());
+        org.junit.jupiter.api.Assertions.assertTrue(deadLetter.get("cause").asText().contains("items must not be empty"));
+        org.junit.jupiter.api.Assertions.assertEquals(invalidPayload, deadLetter.get("originalPayload").asText());
+    }
+
+    private String validOrderPayload(String orderId) {
+        return """
                 {
                   "orderId": "%s",
                   "clientId": "CLI-99821",
@@ -103,11 +141,30 @@ class OrderWorkerEndToEndTest {
                     { "productId": "PRD-008", "quantity": 12, "unitPrice": 8200.00 }
                   ]
                 }
-                """.formatted(ORDER_ID);
+                """.formatted(orderId);
+    }
 
+    private void publish(String topic, String key, String payload) throws Exception {
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties())) {
-            producer.send(new ProducerRecord<>("orders-topic", ORDER_ID, payload)).get();
+            producer.send(new ProducerRecord<>(topic, key, payload)).get();
         }
+    }
+
+    private JsonNode waitForDeadLetter(String orderId) throws Exception {
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties())) {
+            consumer.subscribe(List.of("orders-dlt"));
+            Instant deadline = Instant.now().plus(Duration.ofSeconds(15));
+            while (Instant.now().isBefore(deadline)) {
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(300));
+                for (ConsumerRecord<String, String> record : records) {
+                    JsonNode value = objectMapper.readTree(record.value());
+                    if (orderId.equals(value.get("orderId").asText())) {
+                        return value;
+                    }
+                }
+            }
+        }
+        throw new AssertionError("Expected DLT message for orderId " + orderId);
     }
 
     private Properties producerProperties() {
@@ -116,6 +173,17 @@ class OrderWorkerEndToEndTest {
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
+        return properties;
+    }
+
+    private Properties consumerProperties() {
+        Properties properties = new Properties();
+        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+        properties.put(ConsumerConfig.GROUP_ID_CONFIG, "order-worker-e2e-dlt-" + UUID.randomUUID());
+        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
         return properties;
     }
 

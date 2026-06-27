@@ -1,82 +1,250 @@
 # Worker reactivo de pedidos B2B
 
-Monorepo para un flujo reactivo de pedidos: Kafka → enriquecimiento HTTP con caché Redis → cálculo de impuestos → MongoDB, con reintentos, circuit breaker y DLT.
-
-## Estado inicial
-
-Esta primera entrega deja creada la infraestructura, las fronteras hexagonales y los contratos. El siguiente incremento implementará la regla de impuestos como lógica de dominio pura y, después, los adaptadores del flujo completo.
-
-## Arquitectura
+Monorepo para procesar pedidos B2B de punta a punta:
 
 ```text
-orders-topic
-     │
-     ▼
-Kafka adapter ──► Application service ──► Domain (orden, enriquecimiento, impuestos)
-                       │        │       │
-                       │        │       └── MongoDB output port
-                       │        └────────── Products / Clients output ports
-                       └────────────────── Cache output port
-     │
-     └─ error tras reintentos ──────────► orders-dlt
+Kafka orders-topic
+      |
+      v
+order-worker Java / WebFlux
+      |
+      +--> Products API Go + Redis cache
+      +--> Clients API NestJS + Redis cache
+      |
+      v
+MongoDB enriched-orders
+      |
+      +--> orders-dlt cuando el error es irrecuperable
 ```
 
-`order-worker` organiza código por responsabilidad, no por framework:
+El stack completo levanta con Docker Compose y no requiere servicios externos.
 
-```text
-domain/        Entidades, value objects y reglas puras.
-application/   Casos de uso y puertos de entrada/salida.
-adapters/in/   Kafka y HTTP de entrada.
-adapters/out/  HTTP, Redis y MongoDB.
-config/        Wiring Spring, Kafka y Resilience4j.
-```
+## Ejecución con un solo comando
 
-Los adaptadores solo traducen protocolos. El servicio de aplicación orquesta `Mono`/`Flux`; no contiene configuración técnica. Las reglas tributarias vivirán exclusivamente en `domain` y usarán `BigDecimal`.
-
-`OrderProcessingService` implementa el caso de uso principal: verifica idempotencia, obtiene cliente y productos por puertos reactivos, calcula la orden enriquecida con el dominio y persiste por el puerto de repositorio. Si el pedido ya existe como `PROCESSED`, termina sin consultar APIs externas ni guardar duplicados.
-
-## Regla de impuesto base
-
-`TaxCalculationService` es un servicio de dominio puro. Calcula cada línea con `BigDecimal` y redondeo `HALF_UP` a dos decimales: `subtotal = quantity × unitPrice`, `taxAmount = subtotal × taxRate` y `lineTotal = subtotal + taxAmount`. Las tasas son `GRAVADO` 19 %, `REDUCIDO` 5 % y `EXENTO` 0 %. El `taxRegime` del cliente se conserva en la orden enriquecida, pero no altera la tasa.
-
-## Módulos
-
-| Directorio | Tecnología | Responsabilidad |
-| --- | --- | --- |
-| `order-worker` | Java 21, Spring Boot WebFlux | Consume y procesa pedidos. |
-| `products-api` | Go 1.21 | Catálogo mock, `GET /products/{productId}`. |
-| `clients-api` | NestJS | Clientes mock, `GET /clients/:id`. |
-| `scripts` | Bash | Publicación manual de pedidos de prueba. |
-
-## Arranque (objetivo final)
+Desde la raíz del repositorio:
 
 ```bash
 docker compose up --build
 ```
 
-Las variables disponibles están en `.env.example`. Docker Compose utiliza esos valores como defaults, por lo que no requiere un `.env` para iniciar.
+Ese comando construye y levanta:
 
-Las pruebas del worker se ejecutan sin una instalación global de Maven mediante `./mvnw test` (o `./mvnw.cmd test` en Windows).
-
-## Herramientas visuales locales
-
-Al levantar el stack también quedan disponibles:
-
-| Herramienta | URL | Uso |
+| Servicio | Descripción | Puerto host |
 | --- | --- | --- |
-| Kafka UI | `http://localhost:8083` | Ver `orders-topic`, `orders-dlt`, mensajes, consumer groups y particiones. |
-| Mongo Express | `http://localhost:8084` | Ver la base `orders` y la colección `enriched-orders`. |
+| `zookeeper` | Infraestructura Kafka | interno |
+| `kafka` | Broker con `orders-topic` y `orders-dlt` | `9094` |
+| `kafka-init` | Crea tópicos requeridos | interno |
+| `mongodb` | Persistencia de órdenes enriquecidas | `27017` |
+| `redis` | Caché de APIs externas | `6379` |
+| `products-api` | API Go de productos mock | `8081` |
+| `clients-api` | API NestJS de clientes mock | `8082` |
+| `order-worker` | Worker Java reactivo | `8080` |
+| `kafka-ui` | UI para Kafka | `8083` |
+| `mongo-express` | UI para MongoDB | `8084` |
 
-Puertos configurables:
+Herramientas visuales:
 
-```env
-KAFKA_UI_PORT=8083
-MONGO_EXPRESS_PORT=8084
+- Kafka UI: http://localhost:8083
+- Mongo Express: http://localhost:8084
+- Worker health: http://localhost:8080/actuator/health
+
+## Dependencias de inicio
+
+`order-worker` no arranca hasta que sus dependencias están listas. En `docker-compose.yml` se usa `depends_on` con `healthcheck`:
+
+- `kafka-init` debe completar la creación de `orders-topic` y `orders-dlt`.
+- `mongodb` debe responder `ping`.
+- `redis` debe responder `PONG`.
+- `products-api` debe responder `/health`.
+- `clients-api` debe responder `/health`.
+
+Esto permite que el evaluador ejecute solo:
+
+```bash
+docker compose up --build
 ```
 
-## Decisiones ya fijadas
+sin pasos manuales adicionales.
 
-- Consumidor Kafka con `reactor-kafka`; los errores agotados se convertirán en eventos DLT con `timestamp`, causa e intento.
-- Idempotencia mediante índice único de `orderId` y una comprobación explícita de estado `PROCESSED`.
-- Caché por puerto (`CachePort`), implementada con Redis reactivo y TTL configurable.
-- Ningún adaptador podrá invocar `block()`, `Thread.sleep()` ni APIs síncronas dentro de un pipeline reactivo.
+## Arquitectura hexagonal
+
+El worker separa dominio, aplicación e infraestructura:
+
+```text
+order-worker/src/main/java/com/b2b/orders
+  domain/        Modelos y reglas puras de negocio.
+  application/   Caso de uso y puertos de entrada/salida.
+  adapters/in/   Adaptador Kafka.
+  adapters/out/  Adaptadores HTTP, MongoDB y Redis.
+  config/        Configuración Spring, Kafka, WebClient y Resilience4j.
+```
+
+Responsabilidades principales:
+
+- `OrderKafkaConsumerAdapter`: recibe mensajes Kafka, deserializa y delega al caso de uso.
+- `OrderProcessingService`: orquesta idempotencia, enriquecimiento, cálculo y persistencia.
+- `TaxCalculationService`: calcula impuestos con `BigDecimal`.
+- `ProductsWebClientAdapter` y `ClientsWebClientAdapter`: consultan APIs externas de forma reactiva, con caché Redis y Resilience4j.
+- `MongoOrderRepositoryAdapter`: persiste en MongoDB reactivo y protege idempotencia.
+- `KafkaDeadLetterPublisher`: publica errores irrecuperables en `orders-dlt`.
+
+No se usa `.block()`, `Thread.sleep()` ni llamadas síncronas dentro del pipeline reactivo.
+
+## Flujo funcional
+
+1. `order-worker` consume un JSON desde `orders-topic`.
+2. Valida campos obligatorios: `orderId`, `clientId`, `items` no nulo/no vacío y datos de cada ítem.
+3. Verifica idempotencia en MongoDB: si ya existe `orderId` con estado `PROCESSED`, descarta el mensaje sin error.
+4. Consulta Products API por cada producto distinto del pedido.
+5. Consulta Clients API por el cliente.
+6. Cachea respuestas externas en Redis con TTL configurable.
+7. Calcula subtotal, impuesto y total por línea.
+8. Persiste el documento enriquecido en `orders.enriched-orders`.
+9. Si el procesamiento falla tras reintentos, publica el payload original en `orders-dlt` con metadata del error.
+
+## Regla de impuesto base
+
+El impuesto se calcula por línea según `taxCategory` del producto:
+
+| Tax category | Tasa |
+| --- | ---: |
+| `GRAVADO` | 19 % |
+| `REDUCIDO` | 5 % |
+| `EXENTO` | 0 % |
+
+Fórmulas:
+
+```text
+subtotal = quantity * unitPrice
+taxAmount = subtotal * taxRate
+lineTotal = subtotal + taxAmount
+orderSubtotal = suma(subtotal)
+orderTax = suma(taxAmount)
+grandTotal = suma(lineTotal)
+```
+
+El `taxRegime` del cliente no modifica la tasa, pero se incluye en el documento final para trazabilidad fiscal.
+
+## Variables de entorno
+
+Todas las URLs, puertos y TTLs son configurables por variables de entorno. Los defaults están en `.env.example` y en `docker-compose.yml`.
+
+| Variable | Default | Uso |
+| --- | --- | --- |
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` | Bootstrap servers usados por el worker dentro de Docker. |
+| `KAFKA_ORDERS_TOPIC` | `orders-topic` | Tópico principal de entrada. |
+| `KAFKA_DLT_TOPIC` | `orders-dlt` | Tópico dead letter. |
+| `KAFKA_CONSUMER_GROUP_ID` | `order-worker` | Consumer group del worker. |
+| `KAFKA_MAX_ATTEMPTS` | `3` | Intentos antes de publicar en DLT. |
+| `MONGODB_URI` | `mongodb://mongodb:27017/orders` | URI MongoDB del worker. |
+| `REDIS_HOST` | `redis` | Host Redis dentro de Docker. |
+| `REDIS_PORT` | `6379` | Puerto Redis dentro de Docker. |
+| `PRODUCTS_API_BASE_URL` | `http://products-api:8081` | URL Products API. |
+| `CLIENTS_API_BASE_URL` | `http://clients-api:8082` | URL Clients API. |
+| `CACHE_TTL_SECONDS` | `300` | TTL del caché Redis. |
+| `WORKER_PORT` | `8080` | Puerto expuesto del worker. |
+| `PRODUCTS_API_PORT` | `8081` | Puerto expuesto de Products API. |
+| `CLIENTS_API_PORT` | `8082` | Puerto expuesto de Clients API. |
+| `MONGODB_PORT` | `27017` | Puerto expuesto de MongoDB. |
+| `REDIS_PORT_HOST` | `6379` | Puerto expuesto de Redis. |
+| `KAFKA_PORT` | `9094` | Puerto Kafka para acceso desde host. |
+| `KAFKA_UI_PORT` | `8083` | Puerto Kafka UI. |
+| `MONGO_EXPRESS_PORT` | `8084` | Puerto Mongo Express. |
+
+## Producir un mensaje de prueba
+
+Primero levanta el stack:
+
+```bash
+docker compose up --build
+```
+
+En otra terminal, publica un pedido.
+
+Windows:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\produce-order.ps1
+```
+
+macOS / Linux:
+
+```bash
+bash scripts/produce-order.sh
+```
+
+Para probar idempotencia, publica dos veces el mismo `orderId`.
+
+Windows:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\produce-order.ps1 -OrderId ORD-IDEMPOTENCY-001
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\produce-order.ps1 -OrderId ORD-IDEMPOTENCY-001
+```
+
+macOS / Linux:
+
+```bash
+bash scripts/produce-order.sh --order-id ORD-IDEMPOTENCY-001
+bash scripts/produce-order.sh --order-id ORD-IDEMPOTENCY-001
+```
+
+Luego verifica:
+
+- Kafka UI: `orders-topic` recibió el mensaje.
+- Mongo Express: base `orders`, colección `enriched-orders`.
+- Redis:
+
+```bash
+docker compose exec redis redis-cli
+KEYS products:*
+KEYS clients:*
+TTL products:PRD-001
+```
+
+## Tests
+
+El worker incluye tests unitarios y de integración.
+
+Unitarios:
+
+- `TaxCalculationServiceTest`: lógica de impuestos, totales y precisión decimal.
+- `OrderProcessingServiceTest`: enriquecimiento, idempotencia y reutilización de productos repetidos.
+
+Integración con Testcontainers:
+
+- `OrderWorkerEndToEndTest`: levanta Kafka y MongoDB reales, produce un mensaje en Kafka y verifica el documento persistido en MongoDB.
+- También valida DLT con un mensaje inválido (`items: null`): el pedido no se guarda en Mongo y se publica en `orders-dlt`.
+
+Ejecutar tests en macOS / Linux:
+
+```bash
+cd order-worker
+./mvnw test
+```
+
+Ejecutar tests en Windows:
+
+```powershell
+cd order-worker
+$env:DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
+.\mvnw.cmd test
+```
+
+El reporte de cobertura JaCoCo se genera en:
+
+```text
+order-worker/target/site/jacoco/index.html
+```
+
+El build exige mínimo 70 % de cobertura de líneas en clases de negocio de `domain` y `application.service`.
+
+## Decisiones técnicas
+
+- Programación reactiva con Spring WebFlux, Reactor Kafka, Reactive MongoDB y Redis reactivo.
+- Arquitectura hexagonal para aislar reglas de negocio de Kafka, HTTP, Redis y MongoDB.
+- Idempotencia por `orderId` mediante verificación explícita de estado `PROCESSED` e índice único en MongoDB.
+- Cálculos monetarios con `BigDecimal`, nunca `double`.
+- Resilience4j aplica retry y circuit breaker alrededor de llamadas HTTP externas.
+- Redis cachea productos y clientes con TTL configurable.
+- DLT incluye `orderId`, payload original, timestamp, clase de error, causa raíz e intento.

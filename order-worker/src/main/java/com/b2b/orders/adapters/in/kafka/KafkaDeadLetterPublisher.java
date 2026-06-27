@@ -41,16 +41,25 @@ final class KafkaDeadLetterPublisher {
     private ProducerRecord<String, String> buildRecord(String originalPayload, Throwable error, int attempt) throws Exception {
         String payload = Objects.requireNonNull(originalPayload, "original payload is required");
         Throwable safeError = Objects.requireNonNull(error, "error is required");
+        Throwable rootCause = rootCause(safeError);
         String orderId = extractOrderId(payload);
         DeadLetterMessage message = new DeadLetterMessage(
                 orderId,
                 payload,
                 clock.instant(),
-                safeError.getClass().getName(),
-                safeError.getMessage(),
+                rootCause.getClass().getName(),
+                rootCause.getMessage(),
                 attempt
         );
         return new ProducerRecord<>(dltTopic, orderId, objectMapper.writeValueAsString(message));
+    }
+
+    private Throwable rootCause(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private String extractOrderId(String payload) {
