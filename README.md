@@ -66,14 +66,6 @@ Herramientas visuales:
 - `clients-api` debe responder `/health`.
 - `dashboard-ui` espera a que `order-worker`, `products-api` y `clients-api` estén saludables.
 
-Esto permite que el evaluador ejecute solo:
-
-```bash
-docker compose up --build
-```
-
-sin pasos manuales adicionales.
-
 ## Arquitectura hexagonal
 
 El worker separa dominio, aplicación e infraestructura:
@@ -98,7 +90,6 @@ Responsabilidades principales:
 - `OrderDemoPublishController`: endpoint HTTP de demo usado por el dashboard para publicar mensajes en Kafka sin saltarse el pipeline.
 - `dashboard-ui`: frontend Angular 20/Nx que consume los catálogos mock y construye pedidos de prueba.
 
-No se usa `.block()`, `Thread.sleep()` ni llamadas síncronas dentro del pipeline reactivo.
 
 ## Flujo funcional
 
@@ -114,26 +105,6 @@ No se usa `.block()`, `Thread.sleep()` ni llamadas síncronas dentro del pipelin
 
 El dashboard es una herramienta de demostración: no procesa ni persiste órdenes. Solo publica pedidos en Kafka a través del worker para que el flujo real siga siendo `Kafka → Worker → APIs externas/Redis → MongoDB`.
 
-## Regla de impuesto base
-
-El impuesto se calcula por línea según `taxCategory` del producto:
-
-| Tax category | Tasa |
-| --- | ---: |
-| `GRAVADO` | 19 % |
-| `REDUCIDO` | 5 % |
-| `EXENTO` | 0 % |
-
-Fórmulas:
-
-```text
-subtotal = quantity * unitPrice
-taxAmount = subtotal * taxRate
-lineTotal = subtotal + taxAmount
-orderSubtotal = suma(subtotal)
-orderTax = suma(taxAmount)
-grandTotal = suma(lineTotal)
-```
 
 El `taxRegime` del cliente no modifica la tasa, pero se incluye en el documento final para trazabilidad fiscal.
 
@@ -257,8 +228,6 @@ El reporte de cobertura JaCoCo se genera en:
 ```text
 order-worker/target/site/jacoco/index.html
 ```
-
-El build exige mínimo 70 % de cobertura de líneas en clases de negocio de `domain` y `application.service`.
 
 ## Decisiones técnicas
 
