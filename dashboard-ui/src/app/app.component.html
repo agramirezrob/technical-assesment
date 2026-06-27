@@ -1,0 +1,185 @@
+<main class="page">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">B2B Reactive Orders</p>
+      <h1>Dashboard demo para publicar pedidos</h1>
+      <p>
+        Selecciona un cliente y productos mock. El dashboard publica el JSON en el worker,
+        el worker lo envia a <code>orders-topic</code> y el pipeline real lo procesa hasta MongoDB.
+      </p>
+    </div>
+    <div class="links">
+      <a href="http://localhost:8083" target="_blank" rel="noreferrer">Kafka UI</a>
+      <a href="http://localhost:8084" target="_blank" rel="noreferrer">Mongo Express</a>
+    </div>
+  </section>
+
+  @if (error()) {
+    <section class="alert error">{{ error() }}</section>
+  }
+
+  <section class="grid">
+    <form class="card form" (ngSubmit)="publish()">
+      <h2>Nuevo pedido</h2>
+
+      <label>
+        Order ID
+        <div class="order-id-control">
+          <input
+            name="orderId"
+            placeholder="Escribe un Order ID o genera uno"
+            [ngModel]="orderId()"
+            (ngModelChange)="orderId.set($event)"
+          />
+          <button type="button" class="ghost" (click)="regenerateOrderId()">Generar ID</button>
+        </div>
+        <small>
+          Puedes escribirlo manualmente para probar idempotencia o generar uno para evitar duplicados.
+        </small>
+      </label>
+
+      <label>
+        Cliente
+        <select name="clientId" [ngModel]="selectedClientId()" (ngModelChange)="selectedClientId.set($event)">
+          <option value="" disabled>Selecciona un cliente</option>
+          @for (client of clients(); track client.clientId) {
+            <option [value]="client.clientId">
+              {{ client.name }} · {{ client.clientId }}
+            </option>
+          }
+        </select>
+      </label>
+
+      @if (selectedClient(); as client) {
+        <div class="client-card">
+          <strong>{{ client.name }}</strong>
+          <span>{{ client.segment }} · {{ client.taxRegime }}</span>
+          <span>{{ client.region }} · canal {{ client.channel }}</span>
+        </div>
+      }
+
+      <div class="items-header">
+        <h3>Items</h3>
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="items().length >= maxOrderItems"
+          (click)="addItem()"
+        >
+          + Agregar producto
+        </button>
+      </div>
+
+      @for (item of items(); track index; let index = $index) {
+        <article class="item-row">
+          <label>
+            Producto
+            <select name="product-{{ index }}" [ngModel]="item.productId" (ngModelChange)="selectProduct(index, $event)">
+              <option value="" disabled>Selecciona un producto</option>
+              @for (product of products(); track product.productId) {
+                <option [value]="product.productId">
+                  {{ product.name }} · {{ product.taxCategory }}
+                </option>
+              }
+            </select>
+          </label>
+          <label>
+            Cantidad
+            <input
+              name="quantity-{{ index }}"
+              type="number"
+              min="1"
+              placeholder="Ej. 24"
+              [ngModel]="item.quantity"
+              (blur)="updateQuantity(index, $any($event.target).value)"
+            />
+          </label>
+          <label>
+            Precio unitario
+            <input
+              name="price-{{ index }}"
+              type="number"
+              min="1"
+              max="9999"
+              step="0.01"
+              placeholder="1 a 9999"
+              [ngModel]="item.unitPrice"
+              (blur)="updateUnitPrice(index, $any($event.target).value)"
+            />
+          </label>
+          <button type="button" class="danger" (click)="removeItem(index)">Quitar</button>
+          @if (productById(item.productId); as product) {
+            <small>
+              SKU {{ product.sku }} · {{ product.category }}
+            </small>
+          }
+        </article>
+      }
+
+      <button class="primary" type="submit" [disabled]="!canPublish()">
+        {{ publishing() ? 'Publicando...' : 'Publicar Orden' }}
+      </button>
+    </form>
+
+    <aside class="card">
+      <h2>Resumen estimado</h2>
+      <dl class="summary">
+        <div>
+          <dt>Subtotal</dt>
+          <dd>{{ formatMoney(summary().subtotal) }}</dd>
+        </div>
+        <div>
+          <dt>Impuesto</dt>
+          <dd>{{ formatMoney(summary().totalTax) }}</dd>
+        </div>
+        <div class="total">
+          <dt>Total</dt>
+          <dd>{{ formatMoney(summary().grandTotal) }}</dd>
+        </div>
+      </dl>
+
+      <h3>Payload Kafka a publicar</h3>
+      <p class="preview-note">
+        Este es el mensaje de entrada. El worker lo enriquecera consultando Products API y Clients API.
+      </p>
+      <pre>{{ payloadPreview() }}</pre>
+
+      <h3>Documento esperado en MongoDB</h3>
+      <p class="preview-note">
+        Vista estimada del documento final despues del enriquecimiento, calculo de impuestos y persistencia.
+      </p>
+      <pre>{{ mongoDocumentPreview() }}</pre>
+    </aside>
+  </section>
+
+  @if (successModal(); as success) {
+    <section class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="success-title">
+      <article class="modal-card">
+        <div class="modal-icon">✓</div>
+        <p class="eyebrow">Orden publicada</p>
+        <h2 id="success-title">La orden fue publicada con exito</h2>
+        <p>
+          Se envio al topico <strong>{{ success.topic }}</strong>. El worker la procesara y podras verla
+          en Mongo Express dentro de <code>orders.enriched-orders</code>.
+        </p>
+        <div class="modal-order">
+          <span>Order ID</span>
+          <strong>{{ success.orderId }}</strong>
+        </div>
+        <button type="button" class="primary" (click)="closeSuccessModal()">Crear otra orden</button>
+      </article>
+    </section>
+  }
+
+  @if (errorModal(); as message) {
+    <section class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="error-title">
+      <article class="modal-card">
+        <div class="modal-icon error-icon">!</div>
+        <p class="eyebrow error-eyebrow">Error</p>
+        <h2 id="error-title">No se pudo publicar la orden</h2>
+        <p>{{ message }}</p>
+        <button type="button" class="primary" (click)="closeErrorModal()">Entendido</button>
+      </article>
+    </section>
+  }
+</main>
