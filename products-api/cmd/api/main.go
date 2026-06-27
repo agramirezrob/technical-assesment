@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -33,6 +34,19 @@ var products = map[string]product{
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/products", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/products" {
+			http.NotFound(w, r)
+			return
+		}
+		values := make([]product, 0, len(products))
+		for _, value := range products {
+			values = append(values, value)
+		}
+		sort.Slice(values, func(i, j int) bool { return values[i].ProductID < values[j].ProductID })
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(values)
+	})
 	mux.HandleFunc("/products/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/products/")
 		value, found := products[id]

@@ -24,6 +24,11 @@ export class ClientsController {
     return { status: 'UP' };
   }
 
+  @Get('clients')
+  findAll(): Client[] {
+    return Object.values(clients).sort((left, right) => left.clientId.localeCompare(right.clientId));
+  }
+
   @Get('clients/:id')
   findById(@Param('id') id: string): Client {
     const client = clients[id];
