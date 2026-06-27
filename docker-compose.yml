@@ -143,3 +143,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  dashboard-ui:
+    build: ./dashboard-ui
+    ports:
+      - "${DASHBOARD_PORT:-8085}:80"
+    depends_on:
+      order-worker:
+        condition: service_healthy
+      products-api:
+        condition: service_healthy
+      clients-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

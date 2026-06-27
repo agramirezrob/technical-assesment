@@ -15,6 +15,11 @@ order-worker Java / WebFlux
 MongoDB enriched-orders
       |
       +--> orders-dlt cuando el error es irrecuperable
+
+Dashboard Angular/Nx
+      |
+      +--> lista productos/clientes mock
+      +--> publica pedidos demo al worker
 ```
 
 El stack completo levanta con Docker Compose y no requiere servicios externos.
@@ -41,11 +46,13 @@ Ese comando construye y levanta:
 | `order-worker` | Worker Java reactivo | `8080` |
 | `kafka-ui` | UI para Kafka | `8083` |
 | `mongo-express` | UI para MongoDB | `8084` |
+| `dashboard-ui` | Dashboard Angular/Nx para publicar pedidos demo | `8085` |
 
 Herramientas visuales:
 
 - Kafka UI: http://localhost:8083
 - Mongo Express: http://localhost:8084
+- Dashboard: http://localhost:8085
 - Worker health: http://localhost:8080/actuator/health
 
 ## Dependencias de inicio
@@ -57,6 +64,7 @@ Herramientas visuales:
 - `redis` debe responder `PONG`.
 - `products-api` debe responder `/health`.
 - `clients-api` debe responder `/health`.
+- `dashboard-ui` espera a que `order-worker`, `products-api` y `clients-api` estén saludables.
 
 Esto permite que el evaluador ejecute solo:
 
@@ -87,6 +95,8 @@ Responsabilidades principales:
 - `ProductsWebClientAdapter` y `ClientsWebClientAdapter`: consultan APIs externas de forma reactiva, con caché Redis y Resilience4j.
 - `MongoOrderRepositoryAdapter`: persiste en MongoDB reactivo y protege idempotencia.
 - `KafkaDeadLetterPublisher`: publica errores irrecuperables en `orders-dlt`.
+- `OrderDemoPublishController`: endpoint HTTP de demo usado por el dashboard para publicar mensajes en Kafka sin saltarse el pipeline.
+- `dashboard-ui`: frontend Angular 20/Nx que consume los catálogos mock y construye pedidos de prueba.
 
 No se usa `.block()`, `Thread.sleep()` ni llamadas síncronas dentro del pipeline reactivo.
 
@@ -101,6 +111,8 @@ No se usa `.block()`, `Thread.sleep()` ni llamadas síncronas dentro del pipelin
 7. Calcula subtotal, impuesto y total por línea.
 8. Persiste el documento enriquecido en `orders.enriched-orders`.
 9. Si el procesamiento falla tras reintentos, publica el payload original en `orders-dlt` con metadata del error.
+
+El dashboard es una herramienta de demostración: no procesa ni persiste órdenes. Solo publica pedidos en Kafka a través del worker para que el flujo real siga siendo `Kafka → Worker → APIs externas/Redis → MongoDB`.
 
 ## Regla de impuesto base
 
@@ -150,6 +162,7 @@ Todas las URLs, puertos y TTLs son configurables por variables de entorno. Los d
 | `KAFKA_PORT` | `9094` | Puerto Kafka para acceso desde host. |
 | `KAFKA_UI_PORT` | `8083` | Puerto Kafka UI. |
 | `MONGO_EXPRESS_PORT` | `8084` | Puerto Mongo Express. |
+| `DASHBOARD_PORT` | `8085` | Puerto del dashboard Angular/Nx. |
 
 ## Producir un mensaje de prueba
 
@@ -160,6 +173,14 @@ docker compose up --build
 ```
 
 En otra terminal, publica un pedido.
+
+Opción visual:
+
+```text
+http://localhost:8085
+```
+
+Desde el dashboard puedes seleccionar un cliente mock, elegir productos mock, publicar la orden y luego verificarla en Kafka UI o Mongo Express.
 
 Windows:
 
